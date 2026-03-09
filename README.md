@@ -25,6 +25,28 @@ silently “upgrade” calls.
 Under the hood, the unsafe tier is implemented by passing `--unsafe` through to
 `artcraft invoke`.
 
+### Allowlist introspection (`--list-allowed`)
+
+To see what your installed ArtCraft build will accept, query the reported allowlists:
+
+```bash
+artcraft invoke --list-allowed --json
+```
+
+Shape:
+
+```json
+{ "safe": ["..."], "unsafe": ["..."], "unsafeGateEnabled": true }
+```
+
+Semantics:
+
+- `safe`: commands accepted without `--unsafe`
+- `unsafe`: commands that require `--unsafe` (UNSAFE tier)
+- `unsafeGateEnabled`: whether `--unsafe` is accepted at all
+
+Treat this output as *runtime facts* about the installed ArtCraft build (it may vary by version/build/config).
+
 ### Supported UNSAFE readonly subset (diagnostics)
 
 Some ArtCraft builds expose a small set of **read-only** introspection commands in the
@@ -118,6 +140,12 @@ cd packages/client
 python3 -m pip install -e "./.[dev]"
 python3 -m pytest -q
 ```
+
+The unit tests are designed to be fast and hermetic (they use a fake `artcraft` executable).
+
+Anything that talks to a real ArtCraft install, the network, or an account is **manual-only** and must be an explicit
+human opt-in (it may incur cost and/or require credentials). A fuller “digital twin” harness is a possible future
+direction, but is out of scope today.
 
 ## License
 

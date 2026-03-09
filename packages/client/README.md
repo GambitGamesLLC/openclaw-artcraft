@@ -132,7 +132,7 @@ payloads (they may include sensitive fields).
 
 See: [`examples/unsafe_readonly_network_subset.py`](./examples/unsafe_readonly_network_subset.py)
 
-## Allowlist introspection
+## Allowlist introspection (`list_allowed()` semantics)
 
 You can query the allowlisted commands reported by your installed ArtCraft build:
 
@@ -143,7 +143,7 @@ print(allowed.unsafe)
 print(allowed.unsafe_gate_enabled)
 ```
 
-This calls:
+This calls (note: **no** `--unsafe` is used):
 
 ```bash
 artcraft invoke --list-allowed --json
@@ -154,6 +154,15 @@ and parses a response shaped like:
 ```json
 { "safe": ["..."], "unsafe": ["..."], "unsafeGateEnabled": true }
 ```
+
+Semantics:
+
+- `safe`: commands that the installed ArtCraft build will accept **without** `--unsafe`.
+- `unsafe`: commands that require `--unsafe` (i.e. `tier="unsafe"`) and are still subject to the unsafe gate.
+- `unsafe_gate_enabled`: whether this ArtCraft build will accept `--unsafe` at all.
+  - If `false`, *any* `tier="unsafe"` call will fail with `UnsafeGateDisabled` (even if the command appears in `unsafe`).
+
+The allowlists are *reported by your installed ArtCraft build* and may vary by version/build/config. Treat them as runtime facts, not a stable cross-version API.
 
 ## Exceptions
 
@@ -172,8 +181,23 @@ On failures, exceptions include snippets of stdout/stderr to speed up debugging.
 
 ## Testing
 
+Unit tests are designed to be fast and hermetic: they **do not require** a real ArtCraft install.
+The suite generates a tiny fake `artcraft` executable and points the client at it.
+
 ```bash
 cd packages/client
 python3 -m pip install -e "./.[dev]"
 python3 -m pytest -q
 ```
+
+### Manual-only (cost-incurring / credentialed) checks
+
+Anything that talks to a real ArtCraft install, the network, or an account (for example the
+`UNSAFE readonly-network subset` commands) is **manual-only**:
+
+- do not wire these into CI by default
+- run only when you explicitly intend to spend money / use credentials
+- avoid logging full request/response payloads (they may include sensitive fields)
+
+A future direction for safer automation is a dedicated “digital twin” harness (record/replay or
+sandboxed providers), but that is out of scope for this repo today.

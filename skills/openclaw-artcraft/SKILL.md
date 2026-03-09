@@ -30,6 +30,15 @@ artcraft invoke <tauri_command> [--payload <json>] [--unsafe] --json
   { "safe": ["..."], "unsafe": ["..."], "unsafeGateEnabled": true }
   ```
 
+  Semantics:
+
+  - `safe`: commands that ArtCraft will accept **without** `--unsafe`.
+  - `unsafe`: commands that require `--unsafe` (i.e. OpenClaw `tier="unsafe"`).
+  - `unsafeGateEnabled`: whether ArtCraft will accept `--unsafe` at all.
+    - If `false`, any UNSAFE-tier call will fail (even if the command appears in `unsafe`).
+
+  The allowlists are reported by the *installed ArtCraft build* and may vary by version/build/config.
+
 - For wrapper tooling and debugging helpers:
   - `openclaw-artcraft --help`
   - `openclaw-artcraft invoke --help`
@@ -68,6 +77,20 @@ Unsafe invocation is **disabled by default**. To allow UNSAFE tier calls, enable
 
 Enabling unsafe invocation means you accept additional risk (security / foot-guns) and potentially higher cost.
 Use it sparingly and only when the user explicitly requests it.
+
+## Manual-only: cost-incurring / credentialed operations
+
+Some UNSAFE commands (notably the `readonly-network` subset examples below) may contact the network and/or touch
+an account, and may require credentials.
+
+Policy for OpenClaw workflows:
+
+- treat these calls as **manual-only** (explicit human opt-in)
+- do **not** run them as default “verification”, CI, or background checks
+- avoid logging full request/response payloads (they may include sensitive fields)
+
+A future direction is a dedicated “digital twin” harness (record/replay or sandboxed providers) to enable safer
+automation, but that is out of scope here.
 
 ## Exit codes (ArtCraft CLI)
 

@@ -1,490 +1,335 @@
 #!/usr/bin/env python3
-"""
-ArtCraft Client - Python library for controlling ArtCraft AI generation via CLI.
+"""artcraft_client.client
 
-This module provides the main ArtCraftClient class that wraps the artcraft-cli.sh
-script to enable programmatic control of AI image/video generation workflows.
+Python wrapper around the shipped ArtCraft CLI contract:
+
+    artcraft invoke <tauri_command_name> [--payload ...] [--unsafe] --json
+
+This client intentionally stays low-level: it exposes a single core
+:meth:`ArtCraftClient.invoke` method which maps ArtCraft exit codes into typed
+Python exceptions.
 """
+
+from __future__ import annotations
 
 import json
 import os
 import shutil
 import subprocess
-import time
-from typing import Any, Dict, List, Optional
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
-from .models import Task, MediaFile, GenerationResult
 from .exceptions import (
     ArtCraftError,
     CommandNotFoundError,
-    TaskFailedError,
-    TimeoutError,
-    CLIExecutionError,
+    DisallowedCommand,
+    InvalidArgs,
+    InvokeError,
+    Timeout,
+    UnsafeGateDisabled,
 )
 
 
+_SNIPPET_CHARS = 400
+
+
+def _snippet(s: Optional[str], limit: int = _SNIPPET_CHARS) -> str:
+    if not s:
+        return ""
+    s = s.strip()
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "…"
+
+
+def _resolve_executable(exe: str) -> str:
+    """Resolve an executable path.
+
+    If `exe` looks like a path, return it as-is (expanded). Otherwise resolve it
+    via PATH.
+    """
+
+    exe = os.path.expanduser(exe)
+    if os.path.sep in exe or (os.path.altsep and os.path.altsep in exe):
+        return exe
+
+    resolved = shutil.which(exe)
+    return resolved or exe
+
+
+@dataclass(frozen=True)
+class InvokeResult:
+    """Returned value for `invoke_raw` (primarily for debugging)."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
 class ArtCraftClient:
-    """
-    Python client for ArtCraft AI generation.
-    
-    This client wraps the artcraft-cli.sh script to provide a Pythonic interface
-    for controlling ArtCraft's AI generation capabilities.
-    """
-    
-    def __init__(self, cli_path: str = None, artcraft_dir: str = None):
+    """Client for the `artcraft` CLI."""
+
+    def __init__(self, artcraft_bin: Optional[str] = None):
+        """Create a client.
+
+        Resolution order for the executable:
+        1) constructor arg `artcraft_bin`
+        2) environment variable `ARTCRAFT_BIN`
+        3) `artcraft` on PATH
         """
-        Initialize ArtCraft client.
-        
-        Args:
-            cli_path: Path to artcraft-cli.sh (auto-detected if None)
-            artcraft_dir: Path to ArtCraft project directory
-        """
-        # Auto-detect paths if not provided
-        if artcraft_dir:
-            self.artcraft_dir = Path(artcraft_dir)
-        else:
-            # Default to gambit-artcraft project
-            self.artcraft_dir = Path.home() / ".openclaw" / "workspace" / "projects" / "gambit-artcraft"
-        
-        if cli_path:
-            self.cli_path = Path(cli_path)
-        else:
-            self.cli_path = self.artcraft_dir / "artcraft-cli.sh"
-        
-        # Validate CLI exists
-        if not self.cli_path.exists():
-            raise CommandNotFoundError(
-                f"ArtCraft CLI not found at {self.cli_path}. "
-                f"Please ensure artcraft-cli.sh exists or provide cli_path parameter."
-            )
-        
-        # Make sure CLI is executable
-        if not os.access(self.cli_path, os.X_OK):
-            try:
-                os.chmod(self.cli_path, 0o755)
-            except PermissionError:
+
+        candidate = artcraft_bin or os.environ.get("ARTCRAFT_BIN") or "artcraft"
+        resolved = _resolve_executable(candidate)
+
+        # Validate executable exists.
+        if os.path.sep in resolved or (os.path.altsep and os.path.altsep in resolved):
+            if not os.path.exists(resolved):
                 raise CommandNotFoundError(
-                    f"ArtCraft CLI at {self.cli_path} is not executable and cannot be chmod'd."
+                    f"ArtCraft executable not found: {resolved}",
+                    command=None,
+                    returncode=None,
+                    stdout=None,
+                    stderr=None,
                 )
-    
-    def _run_command(self, command: str, json_output: bool = True) -> Any:
+            if not os.access(resolved, os.X_OK):
+                raise CommandNotFoundError(
+                    f"ArtCraft executable is not executable: {resolved}",
+                    command=None,
+                    returncode=None,
+                    stdout=None,
+                    stderr=None,
+                )
+        else:
+            # If it wasn't a path and which() didn't resolve, we'll find out on
+            # the first invocation, but fail early if possible.
+            if shutil.which(candidate) is None:
+                raise CommandNotFoundError(
+                    f"ArtCraft executable not found on PATH: {candidate}",
+                    command=None,
+                    returncode=None,
+                    stdout=None,
+                    stderr=None,
+                )
+
+        self._artcraft_bin = resolved
+
+    @property
+    def artcraft_bin(self) -> str:
+        return self._artcraft_bin
+
+    def invoke_raw(
+        self,
+        command: str,
+        payload: Optional[Dict[str, Any]] = None,
+        unsafe: bool = False,
+        timeout: Optional[float] = None,
+    ) -> InvokeResult:
+        """Invoke a tauri command and return raw stdout/stderr.
+
+        Most callers should use :meth:`invoke` instead.
         """
-        Internal: Run CLI command and parse output.
-        
-        Args:
-            command: CLI command string (without leading ./artcraft-cli.sh)
-            json_output: Whether to request JSON output
-            
-        Returns:
-            Parsed JSON response or raw output
-            
-        Raises:
-            CLIExecutionError: If command execution fails
-        """
-        # Build full command
-        cmd_parts = [str(self.cli_path)]
-        
-        # Add the actual command first
-        cmd_parts.extend(command.split())
-        
-        # Add --json flag at the end if requested
-        if json_output:
-            cmd_parts.append("--json")
-        
+
+        args = [self._artcraft_bin, "invoke", command]
+        if payload is not None:
+            args.extend(["--payload", json.dumps(payload)])
+        if unsafe:
+            args.append("--unsafe")
+        args.append("--json")
+
         try:
-            # Run the command
-            result = subprocess.run(
-                cmd_parts,
+            completed = subprocess.run(
+                args,
                 capture_output=True,
                 text=True,
-                timeout=60,  # Reasonable timeout for CLI invocation
-                cwd=str(self.cli_path.parent)
+                timeout=timeout,
             )
-            
-            # Check for errors
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() or f"Command failed with return code {result.returncode}"
-                raise CLIExecutionError(f"CLI execution failed: {error_msg}")
-            
-            # Parse output
-            output = result.stdout.strip()
-            if not output:
-                return {}
-            
-            if json_output:
-                try:
-                    return json.loads(output)
-                except json.JSONDecodeError as e:
-                    # Return raw output if JSON parsing fails
-                    return {"raw_output": output}
-            else:
-                return output
-                
-        except subprocess.TimeoutExpired:
-            raise TimeoutError("CLI command timed out")
+        except subprocess.TimeoutExpired as e:
+            raise Timeout(
+                f"ArtCraft invoke timed out after {timeout}s: {command}",
+                command=command,
+                returncode=None,
+                stdout=(e.stdout if isinstance(e.stdout, str) else None),
+                stderr=(e.stderr if isinstance(e.stderr, str) else None),
+            )
         except FileNotFoundError:
-            raise CommandNotFoundError(f"CLI script not found: {self.cli_path}")
-        except Exception as e:
-            raise CLIExecutionError(f"Failed to execute CLI command: {e}")
-    
-    def generate_text_to_image(
-        self,
-        prompt: str,
-        provider: str = "openai",
-        model: str = None,
-        aspect_ratio: str = "16:9",
-        wait: bool = True,
-        timeout: int = 300
-    ) -> GenerationResult:
-        """
-        Generate image from text prompt.
-        
-        Args:
-            prompt: Text description of image to generate
-            provider: AI provider (openai, midjourney, grok, etc.)
-            model: Specific model to use (optional)
-            aspect_ratio: Image aspect ratio
-            wait: If True, wait for completion
-            timeout: Max wait time in seconds
-            
-        Returns:
-            GenerationResult with task_id, status, and output files
-        """
-        # Build command
-        cmd = f"generate:text-to-image \"{prompt}\" --provider {provider}"
-        if model:
-            cmd += f" --model {model}"
-        
-        # Execute command
-        result = self._run_command(cmd, json_output=True)
-        
-        # Extract task ID from result
-        # In simulation mode, we might get a simulated response
-        if result.get("status") == "simulated":
-            task_id = f"simulated-{int(time.time())}-{len(prompt)}"
-        else:
-            task_id = result.get("task_id") or result.get("id") or f"simulated-{int(time.time())}"
-        
-        # Create initial result
-        gen_result = GenerationResult(
-            task_id=task_id,
-            status="submitted",
-            input_prompt=prompt,
-            output_files=[],
-            media_tokens=[]
-        )
-        
-        # Wait for completion if requested
-        if wait:
-            task = self.wait_for_completion(task_id, timeout=timeout)
-            gen_result.status = task.status
-            
-            if task.status == "completed":
-                # Download the media
-                try:
-                    media_path = self.download_media(task_id)
-                    gen_result.output_files = [media_path]
-                    gen_result.media_tokens = [task_id]  # Simplified
-                except Exception:
-                    pass  # Keep empty if download fails
-        
-        return gen_result
-    
-    def generate_image_to_video(
-        self,
-        image_path: str,
-        prompt: str = None,
-        provider: str = "openai",
-        wait: bool = True,
-        timeout: int = 600
-    ) -> GenerationResult:
-        """
-        Generate video from image.
-        
-        Args:
-            image_path: Path to source image or media token
-            prompt: Optional prompt for video generation
-            provider: AI provider
-            wait: If True, wait for completion
-            timeout: Max wait time in seconds
-            
-        Returns:
-            GenerationResult with task_id, status, and output files
-        """
-        # Determine if image_path is a token or file path
-        # For now, treat it as a token (simplified)
-        image_token = image_path
-        
-        # Build command
-        cmd = f"generate:image-to-video {image_token} --provider {provider}"
-        if prompt:
-            cmd += f" --prompt \"{prompt}\""
-        
-        # Execute command
-        result = self._run_command(cmd, json_output=True)
-        
-        task_id = result.get("task_id") or result.get("id") or f"simulated-{int(time.time())}"
-        
-        gen_result = GenerationResult(
-            task_id=task_id,
-            status="submitted",
-            input_prompt=prompt or "",
-            output_files=[],
-            media_tokens=[image_token]
-        )
-        
-        if wait:
-            task = self.wait_for_completion(task_id, timeout=timeout)
-            gen_result.status = task.status
-        
-        return gen_result
-    
-    def generate_edit_image(
-        self,
-        image_path: str,
-        prompt: str,
-        provider: str = "openai",
-        wait: bool = True,
-        timeout: int = 300
-    ) -> GenerationResult:
-        """
-        Edit an existing image.
-        
-        Args:
-            image_path: Path to source image or media token
-            prompt: Description of edits to make
-            provider: AI provider
-            wait: If True, wait for completion
-            timeout: Max wait time in seconds
-            
-        Returns:
-            GenerationResult with task_id, status, and output files
-        """
-        image_token = image_path
-        
-        # Build command
-        cmd = f"generate:edit-image {image_token} --prompt \"{prompt}\" --provider {provider}"
-        
-        # Execute command
-        result = self._run_command(cmd, json_output=True)
-        
-        task_id = result.get("task_id") or result.get("id") or f"simulated-{int(time.time())}"
-        
-        gen_result = GenerationResult(
-            task_id=task_id,
-            status="submitted",
-            input_prompt=prompt,
-            output_files=[],
-            media_tokens=[image_token]
-        )
-        
-        if wait:
-            task = self.wait_for_completion(task_id, timeout=timeout)
-            gen_result.status = task.status
-            
-            if task.status == "completed":
-                try:
-                    media_path = self.download_media(task_id)
-                    gen_result.output_files = [media_path]
-                except Exception:
-                    pass
-        
-        return gen_result
-    
-    def get_task_queue(self) -> List[Task]:
-        """
-        Get all tasks in queue.
-        
-        Returns:
-            List of Task objects
-        """
-        result = self._run_command("queue:list", json_output=True)
-        
-        tasks = []
-        
-        # Handle simulation mode response
-        if result.get("status") == "simulated":
-            # Return empty queue in simulation mode
-            return tasks
-        
-        task_list = result.get("tasks", [])
-        
-        for task_data in task_list:
-            task = Task(
-                id=task_data.get("id", "unknown"),
-                status=task_data.get("task_status", "unknown"),
-                type=task_data.get("task_type", "unknown"),
-                prompt=task_data.get("prompt", ""),
-                provider=task_data.get("provider", "unknown"),
-                created_at=task_data.get("created_at", ""),
-                completed_at=task_data.get("completed_at"),
-                error=task_data.get("error")
+            raise CommandNotFoundError(
+                f"ArtCraft executable not found: {self._artcraft_bin}",
+                command=command,
+                returncode=None,
+                stdout=None,
+                stderr=None,
             )
-            tasks.append(task)
-        
-        return tasks
-    
-    def get_task_status(self, task_id: str) -> Task:
-        """
-        Get status of specific task.
-        
-        Args:
-            task_id: ID of task to check
-            
-        Returns:
-            Task object with current status
-        """
-        tasks = self.get_task_queue()
-        
-        for task in tasks:
-            if task.id == task_id:
-                return task
-        
-        # Task not found
-        return Task(
-            id=task_id,
-            status="not_found",
-            type="unknown",
-            prompt="",
-            provider="",
-            created_at=""
+        except OSError as e:
+            raise CommandNotFoundError(
+                f"Failed to execute ArtCraft binary {self._artcraft_bin}: {e}",
+                command=command,
+                returncode=None,
+                stdout=None,
+                stderr=None,
+            )
+
+        return InvokeResult(
+            returncode=completed.returncode,
+            stdout=completed.stdout or "",
+            stderr=completed.stderr or "",
         )
-    
-    def wait_for_completion(
+
+    def invoke(
         self,
-        task_id: str,
-        timeout: int = 300,
-        poll_interval: int = 10
-    ) -> Task:
-        """
-        Wait for task to complete.
-        
+        command: str,
+        payload: Optional[Dict[str, Any]] = None,
+        unsafe: bool = False,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Invoke a tauri command via the `artcraft` CLI.
+
         Args:
-            task_id: ID of task to wait for
-            timeout: Max wait time in seconds
-            poll_interval: Time between status checks in seconds
-            
+            command: Tauri command name.
+            payload: Optional JSON-serializable dict passed to `--payload`.
+            unsafe: Whether to pass `--unsafe`.
+            timeout: Optional subprocess timeout in seconds.
+
         Returns:
-            Task object with final status
-            
+            Parsed JSON (from stdout).
+
         Raises:
-            TimeoutError: If task doesn't complete within timeout
-            TaskFailedError: If task fails
+            InvalidArgs, UnsafeGateDisabled, DisallowedCommand, InvokeError, Timeout,
+            CommandNotFoundError.
         """
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout:
-            task = self.get_task_status(task_id)
-            
-            if task.status in ["completed", "failed", "dismissed"]:
-                if task.status == "failed":
-                    raise TaskFailedError(f"Task {task_id} failed: {task.error}")
-                return task
-            
-            time.sleep(poll_interval)
-        
-        raise TimeoutError(f"Task {task_id} did not complete within {timeout} seconds")
-    
-    def dismiss_task(self, task_id: str) -> bool:
-        """
-        Dismiss/remove a task from queue.
-        
-        Args:
-            task_id: ID of task to dismiss
-            
-        Returns:
-            True if successful
-        """
+
+        raw = self.invoke_raw(command, payload=payload, unsafe=unsafe, timeout=timeout)
+
+        # Map exit codes.
+        if raw.returncode != 0:
+            msg = (raw.stderr or "").strip() or (raw.stdout or "").strip()
+            details = (
+                f"stdout: {_snippet(raw.stdout)}\n"
+                f"stderr: {_snippet(raw.stderr)}"
+            ).strip()
+
+            if raw.returncode == 2:
+                lowered = (raw.stderr or "").lower()
+                if "unsafe" in lowered and ("disabled" in lowered or "gate" in lowered):
+                    raise UnsafeGateDisabled(
+                        f"Unsafe gate disabled for command {command}. {msg}\n{details}",
+                        command=command,
+                        returncode=raw.returncode,
+                        stdout=raw.stdout,
+                        stderr=raw.stderr,
+                    )
+                raise InvalidArgs(
+                    f"Invalid args for command {command}. {msg}\n{details}",
+                    command=command,
+                    returncode=raw.returncode,
+                    stdout=raw.stdout,
+                    stderr=raw.stderr,
+                )
+
+            if raw.returncode == 3:
+                raise DisallowedCommand(
+                    f"Disallowed/unknown command {command}. {msg}\n{details}",
+                    command=command,
+                    returncode=raw.returncode,
+                    stdout=raw.stdout,
+                    stderr=raw.stderr,
+                )
+
+            if raw.returncode == 4:
+                raise InvokeError(
+                    f"Invoke error for command {command}. {msg}\n{details}",
+                    command=command,
+                    returncode=raw.returncode,
+                    stdout=raw.stdout,
+                    stderr=raw.stderr,
+                )
+
+            raise InvokeError(
+                f"Unexpected ArtCraft exit code {raw.returncode} for command {command}. {msg}\n{details}",
+                command=command,
+                returncode=raw.returncode,
+                stdout=raw.stdout,
+                stderr=raw.stderr,
+            )
+
+        # Parse stdout JSON only.
+        out = (raw.stdout or "").strip()
+        if not out:
+            return {}
+
         try:
-            self._run_command(f"queue:dismiss {task_id}", json_output=False)
-            return True
-        except CLIExecutionError:
-            return False
-    
-    def purge_queue(self) -> bool:
-        """
-        Remove all completed tasks.
-        
-        Returns:
-            True if successful
-        """
-        try:
-            self._run_command("queue:purge", json_output=False)
-            return True
-        except CLIExecutionError:
-            return False
-    
-    def download_media(self, task_id: str, output_dir: str = None) -> str:
-        """
-        Download generated media for a task.
-        
-        Args:
-            task_id: ID of task whose media to download
-            output_dir: Directory to save media (default: current dir)
-            
-        Returns:
-            Path to downloaded file
-        """
-        # Get task to find media token
-        task = self.get_task_status(task_id)
-        
-        # In a real implementation, we'd extract the media token from the task
-        # For now, use task_id as a simplified token
-        media_token = task_id
-        
-        if output_dir:
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-        else:
-            output_path = Path.cwd()
-        
-        # Build download command
-        cmd = f"download {media_token}"
-        
-        try:
-            result = self._run_command(cmd, json_output=False)
-            # In simulation mode, return a placeholder path
-            return str(output_path / f"{media_token}.png")
-        except CLIExecutionError as e:
-            # Return placeholder path even on error (simulation mode)
-            return str(output_path / f"{media_token}.png")
+            parsed = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise InvokeError(
+                "ArtCraft returned non-JSON stdout. "
+                f"command={command} error={e}. "
+                f"stdout: {_snippet(raw.stdout)}\n"
+                f"stderr: {_snippet(raw.stderr)}",
+                command=command,
+                returncode=raw.returncode,
+                stdout=raw.stdout,
+                stderr=raw.stderr,
+            )
+
+        if not isinstance(parsed, dict):
+            raise InvokeError(
+                f"ArtCraft returned JSON that is not an object for command {command}: {type(parsed).__name__}",
+                command=command,
+                returncode=raw.returncode,
+                stdout=raw.stdout,
+                stderr=raw.stderr,
+            )
+
+        return parsed
 
 
-def main():
-    """CLI entry point for openclaw-artcraft."""
+def main() -> None:
+    """Developer-friendly CLI wrapper around the ArtCraft client.
+
+    This is *not* the ArtCraft CLI itself. It's a thin helper primarily useful
+    for debugging.
+
+    Examples:
+        openclaw-artcraft invoke my_command --payload '{"x": 1}'
+    """
+
+    import argparse
     import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: openclaw-artcraft <command> [args]")
-        print("Commands: generate, status, queue, download")
-        print("\nNote: this CLI name was renamed from 'artcraft-client' to 'openclaw-artcraft'.")
-        sys.exit(1)
-    
-    client = ArtCraftClient()
-    command = sys.argv[1]
-    
-    if command == "generate":
-        prompt = " ".join(sys.argv[2:])
-        result = client.generate_text_to_image(prompt, wait=True)
-        print(f"Generated: {result.output_files}")
-    elif command == "status":
-        task_id = sys.argv[2] if len(sys.argv) > 2 else None
-        if task_id:
-            task = client.get_task_status(task_id)
-            print(f"Task {task.id}: {task.status}")
-        else:
-            tasks = client.get_task_queue()
-            for task in tasks:
-                print(f"{task.id}: {task.status}")
-    elif command == "queue":
-        tasks = client.get_task_queue()
-        print(f"Queue: {len(tasks)} tasks")
-        for task in tasks:
-            print(f"  {task.id} - {task.status}")
-    else:
-        print(f"Unknown command: {command}")
-        sys.exit(1)
+
+    parser = argparse.ArgumentParser(prog="openclaw-artcraft")
+    sub = parser.add_subparsers(dest="subcmd", required=True)
+
+    p_invoke = sub.add_parser("invoke", help="Invoke an ArtCraft tauri command")
+    p_invoke.add_argument("command", help="Tauri command name")
+    p_invoke.add_argument("--payload", help="JSON payload string", default=None)
+    p_invoke.add_argument("--unsafe", action="store_true", help="Pass --unsafe")
+    p_invoke.add_argument("--timeout", type=float, default=None, help="Timeout in seconds")
+    p_invoke.add_argument("--bin", dest="artcraft_bin", default=None, help="Override ArtCraft binary")
+
+    args = parser.parse_args()
+
+    if args.subcmd == "invoke":
+        payload_obj = None
+        if args.payload is not None:
+            try:
+                payload_obj = json.loads(args.payload)
+            except json.JSONDecodeError as e:
+                print(f"Invalid --payload JSON: {e}", file=sys.stderr)
+                return sys.exit(2)
+
+        client = ArtCraftClient(artcraft_bin=args.artcraft_bin)
+        try:
+            result = client.invoke(
+                args.command,
+                payload=payload_obj,
+                unsafe=args.unsafe,
+                timeout=args.timeout,
+            )
+        except ArtCraftError as e:
+            print(str(e), file=sys.stderr)
+            return sys.exit(1)
+
+        print(json.dumps(result))
+        return
 
 
 if __name__ == "__main__":

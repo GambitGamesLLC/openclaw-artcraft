@@ -1,36 +1,31 @@
 #!/usr/bin/env python3
-"""
-Basic usage example for ArtCraft Client.
+"""Basic usage example for the ArtCraft Python client."""
 
-This script demonstrates how to use the ArtCraftClient to generate images.
-"""
+from __future__ import annotations
+
+import json
 
 from artcraft_client import ArtCraftClient
 
-def main():
-    # Initialize client
+
+def main() -> None:
     client = ArtCraftClient()
-    
+
     print("ArtCraft Client - Basic Usage Example")
     print("=" * 50)
-    
-    # Generate an image
-    print("\nGenerating image: 'futuristic cat robot in cyberpunk city'")
-    result = client.generate_text_to_image(
-        prompt="futuristic cat robot in cyberpunk city",
-        provider="openai",
-        wait=True
+
+    # NOTE: The command name and payload schema are defined by the installed
+    # ArtCraft build. Replace these with the commands you use.
+    result = client.invoke(
+        "generate:text-to-image",
+        payload={
+            "prompt": "futuristic cat robot in a cyberpunk city",
+            "provider": "openai",
+        },
     )
-    
-    print(f"\nTask ID: {result.task_id}")
-    print(f"Status: {result.status}")
-    print(f"Generated files: {result.output_files}")
-    
-    # Check queue
-    print("\nCurrent task queue:")
-    tasks = client.get_task_queue()
-    for task in tasks:
-        print(f"  {task.id}: {task.status} ({task.type})")
+
+    print(json.dumps(result, indent=2))
+
 
 if __name__ == "__main__":
     main()

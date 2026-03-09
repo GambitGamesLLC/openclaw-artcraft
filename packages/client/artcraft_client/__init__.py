@@ -1,29 +1,31 @@
-"""
-ArtCraft Client - Python library for controlling ArtCraft AI generation via CLI.
+"""ArtCraft client (Python).
 
-This package provides a Python interface to the ArtCraft CLI wrapper,
-enabling programmatic control of AI image/video generation workflows.
+`openclaw-artcraft` is a small Python wrapper around the shipped ArtCraft CLI
+contract:
+
+    artcraft invoke <tauri_command_name> [--payload ...] [--unsafe] --json
 """
 
 from .client import ArtCraftClient
-from .models import Task, MediaFile, GenerationResult
 from .exceptions import (
     ArtCraftError,
     CommandNotFoundError,
-    TaskFailedError,
-    TimeoutError,
-    CLIExecutionError,
+    DisallowedCommand,
+    InvalidArgs,
+    InvokeError,
+    Timeout,
+    UnsafeGateDisabled,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
+
 __all__ = [
     "ArtCraftClient",
-    "Task",
-    "MediaFile",
-    "GenerationResult",
     "ArtCraftError",
     "CommandNotFoundError",
-    "TaskFailedError",
-    "TimeoutError",
-    "CLIExecutionError",
+    "InvalidArgs",
+    "UnsafeGateDisabled",
+    "DisallowedCommand",
+    "InvokeError",
+    "Timeout",
 ]

@@ -6,7 +6,11 @@ Utilities and client libraries for interacting with ArtCraft from OpenClaw workf
 
 ### `packages/client` (Python)
 
-Python client library that wraps the `artcraft-cli.sh` CLI.
+Python client library that wraps the shipped ArtCraft CLI contract:
+
+```bash
+artcraft invoke <tauri_command_name> [--payload ...] [--unsafe] --json
+```
 
 - Install (editable):
 
@@ -19,7 +23,7 @@ python3 -m pip install -e .
 
 ```bash
 cd packages/client
-python3 -m pip install -e ".[dev]"
+python3 -m pip install -e "./.[dev]"
 python3 -m pytest -q
 ```
 

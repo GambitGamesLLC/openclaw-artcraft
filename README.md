@@ -13,11 +13,17 @@ This repo’s OpenClaw skill and Python client are thin wrappers around `artcraf
 They do not (and should not) attempt to bypass ArtCraft’s checks. If ArtCraft rejects a
 command/payload or unsafe is disabled, the invocation will fail.
 
-### Using `--unsafe` from OpenClaw
+### Using the unsafe tier from OpenClaw
 
-`--unsafe` is an **opt-in escalation**. OpenClaw clients/workflows should only pass
-`--unsafe` when the user explicitly requests it and understands the implications; do not
-auto-enable or silently “upgrade” calls.
+In OpenClaw-facing wrappers, unsafe invocation should be an explicit opt-in via a
+**tier** (e.g. `tier="unsafe"` or CLI `--tier unsafe`).
+
+Selecting the unsafe tier is an **opt-in escalation**: only do it when the user
+explicitly requests it and understands the implications; do not auto-enable or
+silently “upgrade” calls.
+
+Under the hood, the unsafe tier is implemented by passing `--unsafe` through to
+`artcraft invoke`.
 
 ### Enabling unsafe invocation in ArtCraft
 

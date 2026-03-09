@@ -115,6 +115,23 @@ print(sorted(preferences.keys()))
 
 See also: [`examples/unsafe_readonly_subset.py`](./examples/unsafe_readonly_subset.py)
 
+## UNSAFE readonly-network subset (network/account diagnostics)
+
+Some ArtCraft builds also expose a small set of **read-only but network/account-touching**
+commands in the UNSAFE allowlist (still gated behind the unsafe switch). When available,
+these are useful for estimating costs and checking Storyteller account state:
+
+- `estimate_image_cost_command`
+- `estimate_video_cost_command`
+- `storyteller_get_credits_command`
+- `storyteller_get_subscription_command`
+
+**Warning:** these calls may contact the network and/or your account, and may require
+credentials depending on your ArtCraft configuration. Avoid logging full request/response
+payloads (they may include sensitive fields).
+
+See: [`examples/unsafe_readonly_network_subset.py`](./examples/unsafe_readonly_network_subset.py)
+
 ## Allowlist introspection
 
 You can query the allowlisted commands reported by your installed ArtCraft build:

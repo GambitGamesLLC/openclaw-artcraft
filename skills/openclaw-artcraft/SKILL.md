@@ -123,3 +123,30 @@ openclaw-artcraft invoke get_app_preferences_command --tier unsafe
 # (Raw contract, generally not recommended for OpenClaw workflows)
 # ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 artcraft invoke get_app_info_command --unsafe --json
 ```
+
+### UNSAFE readonly-network subset (requires gate + UNSAFE tier)
+
+Some ArtCraft builds expose a small set of **read-only but network/account-touching**
+commands in the UNSAFE allowlist (still gated behind the unsafe switch). When available,
+these are useful for estimating costs and checking Storyteller account state:
+
+- `estimate_image_cost_command`
+- `estimate_video_cost_command`
+- `storyteller_get_credits_command`
+- `storyteller_get_subscription_command`
+
+**Warning:** these calls may contact the network and/or your account, and may require
+credentials depending on your ArtCraft configuration. Avoid logging full request/response
+payloads (they may include sensitive fields).
+
+```bash
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke storyteller_get_credits_command --tier unsafe
+
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke storyteller_get_subscription_command --tier unsafe
+
+# Estimate commands may require a payload depending on your ArtCraft build.
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke estimate_image_cost_command --tier unsafe
+```

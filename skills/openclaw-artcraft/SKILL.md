@@ -3,30 +3,62 @@ name: openclaw-artcraft
 description: Optional OpenClaw skill for invoking ArtCraft Tauri commands via the ArtCraft CLI.
 ---
 
-This skill exposes the **ArtCraft CLI invoke contract** for OpenClaw workflows.
+This skill documents the **ArtCraft CLI invoke contract** for OpenClaw workflows.
 
-## Contract
+ArtCraft is the **authoritative policy enforcer** for:
+
+- the command allowlist (what can be invoked), and
+- the unsafe gate (whether unsafe invocations are permitted at all).
+
+This skill is intentionally a thin wrapper and must not assume it can bypass ArtCraft checks.
+
+## Contract (ArtCraft CLI)
 
 ```bash
-artcraft invoke <tauri_command_name> [--payload <json>] [--unsafe] --json
+artcraft invoke <tauri_command> [--payload <json>] [--unsafe] --json
 ```
 
-- For the full, up-to-date reference, run:
-  - `artcraft invoke --help`
+- Inspect the installed ArtCraft allowlists:
+
+  ```bash
+  artcraft invoke --list-allowed --json
+  ```
+
+  Expected JSON shape:
+
+  ```json
+  { "safe": ["..."], "unsafe": ["..."], "unsafeGateEnabled": true }
+  ```
+
+- For wrapper tooling and debugging helpers:
   - `openclaw-artcraft --help`
+  - `openclaw-artcraft invoke --help`
+  - `openclaw-artcraft list-allowed --help`
 
-## Safety / unsafe gate
+## Safety model: strict SAFE vs UNSAFE tiers
 
-ArtCraft is the **authoritative enforcer** of the command allowlist and the unsafe gate.
-This skill is a thin wrapper and should not assume it can bypass ArtCraft’s checks.
+OpenClaw-facing wrappers should treat invocation as a **two-tier model**:
 
-`--unsafe` is an **opt-in escalation**: only pass it with explicit user intent (never
-silently or by default).
+- **SAFE tier (default):** does *not* pass `--unsafe`.
+  - Only SAFE-allowlisted commands should be used.
+- **UNSAFE tier (explicit opt-in):** passes `--unsafe` through to `artcraft invoke`.
+  - Command must be UNSAFE-allowlisted *and* the ArtCraft unsafe gate must be enabled.
 
-Unsafe invocations are **disabled by default** and require enabling **either**:
+### Recommendation (don’t tell users to pass `--unsafe` directly)
+
+Prefer tiered APIs/CLIs so “unsafe” is an explicit, reviewable opt-in:
+
+- Python client: `tier="unsafe"`
+- CLI helper: `openclaw-artcraft invoke --tier unsafe ...`
+
+Only use `artcraft invoke --unsafe ...` when you are deliberately testing the raw ArtCraft contract.
+
+## Enabling UNSAFE invocation (ArtCraft gate)
+
+Unsafe invocation is **disabled by default**. To allow UNSAFE tier calls, enable **either**:
 
 - `ARTCRAFT_ENABLE_UNSAFE_INVOKE=1` (environment), **or**
-- `~/.config/artcraft/cli.json` (user config), with:
+- `~/.config/artcraft/cli.json` (user config), containing:
 
   ```json
   { "enableUnsafeInvoke": true }
@@ -34,10 +66,10 @@ Unsafe invocations are **disabled by default** and require enabling **either**:
 
 ### Risk acknowledgement
 
-Enabling unsafe invocation means you accept additional risk and potentially higher cost.
-Use it sparingly.
+Enabling unsafe invocation means you accept additional risk (security / foot-guns) and potentially higher cost.
+Use it sparingly and only when the user explicitly requests it.
 
-## Exit codes
+## Exit codes (ArtCraft CLI)
 
 - `0` success
 - `2` invalid args / unsafe gate disabled
@@ -46,10 +78,30 @@ Use it sparingly.
 
 ## Examples
 
-```bash
-# Invoke a Tauri command (no payload)
-artcraft invoke app.version --json
+### SAFE: platform info (no payload)
 
-# Invoke with a JSON payload
-artcraft invoke export.render --payload '{"format":"png"}' --json
+```bash
+artcraft invoke platform_info_command --json
+```
+
+### SAFE: flip an image (base64 payload)
+
+```bash
+# 1x1 transparent PNG (base64)
+IMG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X8f5cAAAAASUVORK5CYII="
+
+artcraft invoke flip_image \
+  --payload "{\"image_base64\":\"${IMG_B64}\",\"flip\":\"horizontal\"}" \
+  --json
+```
+
+### UNSAFE: get app info (requires gate + UNSAFE tier)
+
+```bash
+# Prefer the tiered wrapper (explicit opt-in):
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke get_app_info_command --tier unsafe
+
+# (Raw contract, generally not recommended for OpenClaw workflows)
+# ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 artcraft invoke get_app_info_command --unsafe --json
 ```

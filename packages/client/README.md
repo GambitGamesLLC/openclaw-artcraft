@@ -79,6 +79,42 @@ Use it sparingly.
 If unsafe is disabled in the installed ArtCraft build, the client raises
 `UnsafeGateDisabled`.
 
+## UNSAFE readonly subset (diagnostics)
+
+Some ArtCraft builds expose a small **read-only** subset of introspection commands in
+the UNSAFE allowlist (still gated behind the unsafe switch). When available, these are
+useful for diagnostics and UI state without mutating anything:
+
+- `get_app_info_command`
+- `get_provider_order_command`
+- `get_task_queue_command`
+- `get_app_preferences_command`
+
+Example (requires `ARTCRAFT_ENABLE_UNSAFE_INVOKE=1`):
+
+```python
+import os
+from artcraft_client import ArtCraftClient
+
+if os.environ.get("ARTCRAFT_ENABLE_UNSAFE_INVOKE") != "1":
+    raise SystemExit("Set ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 to use tier='unsafe'.")
+
+client = ArtCraftClient()
+
+app_info = client.invoke("get_app_info_command", tier="unsafe")
+provider_order = client.invoke("get_provider_order_command", tier="unsafe")
+queue = client.invoke("get_task_queue_command", tier="unsafe")
+preferences = client.invoke("get_app_preferences_command", tier="unsafe")
+
+# Avoid printing secrets: these payloads may include credentials depending on your build.
+print(sorted(app_info.keys()))
+print(sorted(provider_order.keys()))
+print(sorted(queue.keys()))
+print(sorted(preferences.keys()))
+```
+
+See also: [`examples/unsafe_readonly_subset.py`](./examples/unsafe_readonly_subset.py)
+
 ## Allowlist introspection
 
 You can query the allowlisted commands reported by your installed ArtCraft build:

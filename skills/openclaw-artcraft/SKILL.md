@@ -95,12 +95,30 @@ artcraft invoke flip_image \
   --json
 ```
 
-### UNSAFE: get app info (requires gate + UNSAFE tier)
+### UNSAFE readonly subset (requires gate + UNSAFE tier)
+
+Some ArtCraft builds expose a small set of **read-only** introspection commands in the
+UNSAFE allowlist (still gated behind the unsafe switch). When available, these are
+useful for diagnostics and UI state without mutating anything:
+
+- `get_app_info_command`
+- `get_provider_order_command`
+- `get_task_queue_command`
+- `get_app_preferences_command`
 
 ```bash
 # Prefer the tiered wrapper (explicit opt-in):
 ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
 openclaw-artcraft invoke get_app_info_command --tier unsafe
+
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke get_provider_order_command --tier unsafe
+
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke get_task_queue_command --tier unsafe
+
+ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 \
+openclaw-artcraft invoke get_app_preferences_command --tier unsafe
 
 # (Raw contract, generally not recommended for OpenClaw workflows)
 # ARTCRAFT_ENABLE_UNSAFE_INVOKE=1 artcraft invoke get_app_info_command --unsafe --json

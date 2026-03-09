@@ -25,6 +25,22 @@ silently “upgrade” calls.
 Under the hood, the unsafe tier is implemented by passing `--unsafe` through to
 `artcraft invoke`.
 
+### Supported UNSAFE readonly subset (diagnostics)
+
+Some ArtCraft builds expose a small set of **read-only** introspection commands in the
+UNSAFE allowlist (still gated behind the unsafe switch). When available, prefer the
+tiered wrappers:
+
+- Python client: `tier="unsafe"`
+- CLI helper: `openclaw-artcraft invoke --tier unsafe ...`
+
+Commands commonly used for this readonly subset:
+
+- `get_app_info_command`
+- `get_provider_order_command`
+- `get_task_queue_command`
+- `get_app_preferences_command`
+
 ### Enabling unsafe invocation in ArtCraft
 
 Unsafe invocation is disabled by default. To allow `artcraft invoke --unsafe`, enable one

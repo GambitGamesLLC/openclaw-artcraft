@@ -2,6 +2,19 @@
 
 Utilities and client libraries for interacting with ArtCraft from OpenClaw workflows.
 
+## Optional OpenClaw Skill
+
+A minimal optional skill lives in [`skills/openclaw-artcraft`](./skills/openclaw-artcraft).
+
+Enable it by copying or symlinking the folder into your OpenClaw workspace:
+
+```bash
+mkdir -p ~/.openclaw/workspace/skills
+ln -s "$(pwd)/skills/openclaw-artcraft" ~/.openclaw/workspace/skills/openclaw-artcraft
+```
+
+It should be picked up **next turn** (typically no Gateway restart required).
+
 ## Packages
 
 ### `packages/client` (Python)

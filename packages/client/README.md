@@ -46,11 +46,31 @@ print(result)
 
 ### Unsafe commands
 
+ArtCraft is the **authoritative enforcer** of the command allowlist and unsafe gate.
+Passing `unsafe=True` only adds `--unsafe` to the CLI invocation; ArtCraft may still
+reject the request (e.g., if unsafe is disabled).
+
+`--unsafe` is an **opt-in escalation**: only use it with explicit user intent.
+
 If a command requires `--unsafe`, pass `unsafe=True`:
 
 ```python
 client.invoke("some:unsafe-command", payload={...}, unsafe=True)
 ```
+
+To allow `artcraft invoke --unsafe`, enable unsafe invocation in ArtCraft via **either**:
+
+- `ARTCRAFT_ENABLE_UNSAFE_INVOKE=1` (environment), **or**
+- `~/.config/artcraft/cli.json` with:
+
+  ```json
+  { "enableUnsafeInvoke": true }
+  ```
+
+#### Risk acknowledgement
+
+Enabling unsafe invocation means you accept additional risk and potentially higher cost.
+Use it sparingly.
 
 If unsafe is disabled in the installed ArtCraft build, the client raises
 `UnsafeGateDisabled`.

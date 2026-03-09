@@ -4,9 +4,12 @@
 contract:
 
     artcraft invoke <tauri_command_name> [--payload ...] [--unsafe] --json
+
+This package provides a low-level :class:`~artcraft_client.client.ArtCraftClient`.
+Unsafe invocation is an explicit opt-in via `tier="unsafe"`.
 """
 
-from .client import ArtCraftClient
+from .client import AllowedCommands, ArtCraftClient, Tier
 from .exceptions import (
     ArtCraftError,
     CommandNotFoundError,
@@ -17,9 +20,11 @@ from .exceptions import (
     UnsafeGateDisabled,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
+    "AllowedCommands",
+    "Tier",
     "ArtCraftClient",
     "ArtCraftError",
     "CommandNotFoundError",

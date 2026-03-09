@@ -29,7 +29,7 @@ from artcraft_client.exceptions import (
 
 @pytest.fixture
 def fake_artcraft(tmp_path: Path) -> Path:
-    """Create a fake `artcraft` executable that implements `artcraft invoke ... --json`."""
+    """Create a fake `artcraft` executable implementing `artcraft invoke ... --json`."""
 
     exe = tmp_path / "artcraft"
 
@@ -45,8 +45,33 @@ import time
 
 args = sys.argv[1:]
 
-if len(args) < 3 or args[0] != 'invoke':
-    print('invalid args', file=sys.stderr)
+if len(args) < 2 or args[0] != 'invoke':
+    print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'invalid args'}))
+    sys.exit(2)
+
+# Special form:
+#   artcraft invoke --list-allowed --json
+if len(args) >= 3 and args[1] == '--list-allowed':
+    saw_json = False
+    for tok in args[2:]:
+        if tok == '--json':
+            saw_json = True
+        else:
+            print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': f'unknown arg: {tok}'}))
+            sys.exit(2)
+    if not saw_json:
+        print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'missing --json'}))
+        sys.exit(2)
+
+    print(json.dumps({
+        'safe': ['ok', 'echo_unsafe', 'badjson'],
+        'unsafe': ['unsafe_gate_disabled', 'unsafe_gate_disabled_plain'],
+        'unsafeGateEnabled': True,
+    }))
+    sys.exit(0)
+
+if len(args) < 3:
+    print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'missing command'}))
     sys.exit(2)
 
 command = args[1]
@@ -62,25 +87,29 @@ for tok in it:
         try:
             payload = json.loads(next(it))
         except StopIteration:
-            print('missing payload', file=sys.stderr)
+            print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'missing payload'}))
             sys.exit(2)
         except json.JSONDecodeError:
-            print('payload not json', file=sys.stderr)
+            print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'payload not json'}))
             sys.exit(2)
     elif tok == '--unsafe':
         unsafe = True
     elif tok == '--json':
         saw_json = True
     else:
-        print(f'unknown arg: {tok}', file=sys.stderr)
+        print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': f'unknown arg: {tok}'}))
         sys.exit(2)
 
 if not saw_json:
-    print('missing --json', file=sys.stderr)
+    print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'missing --json'}))
     sys.exit(2)
 
 if command == 'ok':
     print(json.dumps({'ok': True, 'command': command, 'payload': payload}))
+    sys.exit(0)
+
+if command == 'echo_unsafe':
+    print(json.dumps({'ok': True, 'unsafe': unsafe}))
     sys.exit(0)
 
 if command == 'badjson':
@@ -88,20 +117,25 @@ if command == 'badjson':
     sys.exit(0)
 
 if command == 'invalidargs':
-    print('nope', file=sys.stderr)
+    print(json.dumps({'error_details': {'code': 'invalid_args'}, 'message': 'nope'}))
     sys.exit(2)
 
 if command == 'unsafe_gate_disabled':
-    # Simulate a build where unsafe is not permitted.
+    # JSON error mapping should deterministically map this.
+    print(json.dumps({'error_details': {'code': 'unsafe_gate_disabled'}, 'message': 'gate disabled'}))
+    sys.exit(2)
+
+if command == 'unsafe_gate_disabled_plain':
+    # No JSON payload; client should fall back to stderr heuristics.
     print('Unsafe gate disabled', file=sys.stderr)
     sys.exit(2)
 
 if command == 'disallowed':
-    print('disallowed', file=sys.stderr)
+    print(json.dumps({'error_details': {'code': 'disallowed_command'}, 'message': 'disallowed'}))
     sys.exit(3)
 
 if command == 'runtime':
-    print('runtime error', file=sys.stderr)
+    print(json.dumps({'error_details': {'code': 'invoke_error'}, 'message': 'runtime error'}))
     sys.exit(4)
 
 if command == 'sleep':
@@ -109,7 +143,7 @@ if command == 'sleep':
     print(json.dumps({'ok': True}))
     sys.exit(0)
 
-print('unknown command', file=sys.stderr)
+print(json.dumps({'error_details': {'code': 'disallowed_command'}, 'message': 'unknown command'}))
 sys.exit(3)
 PY
 """,
@@ -145,28 +179,47 @@ class TestInvoke:
         out = client.invoke("ok", payload={"a": 1, "b": "two"})
         assert out["payload"] == {"a": 1, "b": "two"}
 
+    def test_invoke_passes_unsafe_only_for_unsafe_tier(self, client: ArtCraftClient):
+        safe_out = client.invoke("echo_unsafe")
+        assert safe_out["unsafe"] is False
+
+        unsafe_out = client.invoke("echo_unsafe", tier="unsafe")
+        assert unsafe_out["unsafe"] is True
+
     def test_invoke_stdout_must_be_json_object(self, client: ArtCraftClient):
         with pytest.raises(InvokeError) as ei:
             client.invoke("badjson")
         # include a useful snippet in the message
         assert "stdout" in str(ei.value).lower()
 
-    def test_invoke_exit_code_2_invalid_args(self, client: ArtCraftClient):
+    def test_invoke_exit_code_2_invalid_args_via_json_code(self, client: ArtCraftClient):
         with pytest.raises(InvalidArgs):
             client.invoke("invalidargs")
 
-    def test_invoke_exit_code_2_unsafe_gate_disabled(self, client: ArtCraftClient):
+    def test_invoke_exit_code_2_unsafe_gate_disabled_via_json_code(self, client: ArtCraftClient):
         with pytest.raises(UnsafeGateDisabled):
-            client.invoke("unsafe_gate_disabled", unsafe=True)
+            client.invoke("unsafe_gate_disabled", tier="unsafe")
 
-    def test_invoke_exit_code_3_disallowed(self, client: ArtCraftClient):
+    def test_invoke_exit_code_2_unsafe_gate_disabled_via_stderr_fallback(self, client: ArtCraftClient):
+        with pytest.raises(UnsafeGateDisabled):
+            client.invoke("unsafe_gate_disabled_plain", tier="unsafe")
+
+    def test_invoke_exit_code_3_disallowed_via_json_code(self, client: ArtCraftClient):
         with pytest.raises(DisallowedCommand):
             client.invoke("disallowed")
 
-    def test_invoke_exit_code_4_runtime(self, client: ArtCraftClient):
+    def test_invoke_exit_code_4_runtime_via_json_code(self, client: ArtCraftClient):
         with pytest.raises(InvokeError):
             client.invoke("runtime")
 
     def test_timeout(self, client: ArtCraftClient):
         with pytest.raises(Timeout):
             client.invoke("sleep", timeout=0.05)
+
+
+class TestListAllowed:
+    def test_list_allowed(self, client: ArtCraftClient):
+        allowed = client.list_allowed()
+        assert "ok" in allowed.safe
+        assert "unsafe_gate_disabled" in allowed.unsafe
+        assert allowed.unsafe_gate_enabled is True

@@ -44,18 +44,22 @@ result = client.invoke(
 print(result)
 ```
 
-### Unsafe commands
+## Tiers (safe vs unsafe)
 
 ArtCraft is the **authoritative enforcer** of the command allowlist and unsafe gate.
-Passing `unsafe=True` only adds `--unsafe` to the CLI invocation; ArtCraft may still
-reject the request (e.g., if unsafe is disabled).
+In the Python client, unsafe invocation is an explicit opt-in via a **tier**:
 
-`--unsafe` is an **opt-in escalation**: only use it with explicit user intent.
+- `tier="safe"` (default) → does *not* pass `--unsafe`
+- `tier="unsafe"` → passes `--unsafe` to `artcraft invoke`
 
-If a command requires `--unsafe`, pass `unsafe=True`:
+Example:
 
 ```python
-client.invoke("some:unsafe-command", payload={...}, unsafe=True)
+client.invoke(
+    "some:unsafe-command",
+    payload={...},
+    tier="unsafe",
+)
 ```
 
 To allow `artcraft invoke --unsafe`, enable unsafe invocation in ArtCraft via **either**:
@@ -67,7 +71,7 @@ To allow `artcraft invoke --unsafe`, enable unsafe invocation in ArtCraft via **
   { "enableUnsafeInvoke": true }
   ```
 
-#### Risk acknowledgement
+### Risk acknowledgement
 
 Enabling unsafe invocation means you accept additional risk and potentially higher cost.
 Use it sparingly.
@@ -75,14 +79,40 @@ Use it sparingly.
 If unsafe is disabled in the installed ArtCraft build, the client raises
 `UnsafeGateDisabled`.
 
+## Allowlist introspection
+
+You can query the allowlisted commands reported by your installed ArtCraft build:
+
+```python
+allowed = client.list_allowed()
+print(allowed.safe)
+print(allowed.unsafe)
+print(allowed.unsafe_gate_enabled)
+```
+
+This calls:
+
+```bash
+artcraft invoke --list-allowed --json
+```
+
+and parses a response shaped like:
+
+```json
+{ "safe": ["..."], "unsafe": ["..."], "unsafeGateEnabled": true }
+```
+
 ## Exceptions
 
-ArtCraft exit codes are mapped to typed exceptions:
+On failures (`returncode != 0`), the client prefers parsing a JSON error payload and
+uses `error_details.code` for deterministic exception mapping.
 
-- `InvalidArgs` (exit code 2)
-- `UnsafeGateDisabled` (exit code 2, detected via stderr)
-- `DisallowedCommand` (exit code 3)
-- `InvokeError` (exit code 4, or JSON parse errors)
+Common mappings:
+
+- `InvalidArgs`
+- `UnsafeGateDisabled`
+- `DisallowedCommand`
+- `InvokeError`
 - `Timeout` (subprocess timeout)
 
 On failures, exceptions include snippets of stdout/stderr to speed up debugging.

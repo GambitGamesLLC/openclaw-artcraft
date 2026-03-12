@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "openclaw_artcraft",
+  "project_id": "d4254a83-f461-489b-9c13-de5d60d5ed40"
+}

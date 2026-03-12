@@ -26,3 +26,7 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
